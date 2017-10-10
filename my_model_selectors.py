@@ -66,6 +66,8 @@ class SelectorBIC(ModelSelector):
 
     http://www2.imm.dtu.dk/courses/02433/doc/ch6_slides.pdf
     Bayesian information criteria: BIC = -2 * logL + p * logN
+    where L is the likelihood of the fitted model, p is the number of parameters,
+    and N is the number of data points
     """
 
     def select(self):
@@ -75,9 +77,21 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        best_num_components = self.min_n_components
+        best_score = float("inf")
+        for n_comp in range(self.min_n_components, self.max_n_components):
+            try:
+                model = self.base_model(n_comp)
+                logL = model.score(self.X, self.lengths)
+                p = (model.startprob_.size - 1) + (model.transmat_.size - 1) + model.means_.size + model.covars_.diagonal().size
+                bic_score = -2*logL + p*np.log(np.sum(self.lengths))
+                if bic_score < best_score:
+                    best_num_components = n_comp
+                    best_score = bic_score
+            except:
+                continue
+        return self.base_model(best_num_components)
 
 
 class SelectorDIC(ModelSelector):
@@ -86,7 +100,6 @@ class SelectorDIC(ModelSelector):
     Biem, Alain. "A model selection criterion for classification: Application to hmm topology optimization."
     Document Analysis and Recognition, 2003. Proceedings. Seventh International Conference on. IEEE, 2003.
     http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.58.6208&rep=rep1&type=pdf
-    https://pdfs.semanticscholar.org/ed3d/7c4a5f607201f3848d4c02dd9ba17c791fc2.pdf
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
@@ -94,7 +107,20 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_num_components = self.min_n_components
+        best_score = float("-inf")
+        for n_comp in range(self.min_n_components, self.max_n_components):
+            try:
+                model = self.base_model(n_comp)
+                logL = model.score(self.X, self.lengths)
+                all_scores = [model.score(self.hwords[word][0], self.hwords[word][1]) for word in self.words if word != self.this_word]
+                dic_score = logL - np.mean(all_scores)
+                if dic_score > best_score:
+                    best_num_components = n_comp
+                    best_score = dic_score
+            except:
+                continue
+        return self.base_model(best_num_components)
 
 
 class SelectorCV(ModelSelector):
@@ -106,4 +132,22 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        best_num_components = self.min_n_components
+        best_score = float("-inf")
+        for n_comp in range(self.min_n_components, self.max_n_components):
+            try:
+                test_score = float("inf")
+                split_method = KFold()
+                all_scores = []
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    train_X, train_lengths = combine_sequences(cv_train_idx, self.sequences)
+                    test_X, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+                    model = GaussianHMM(n_components=n_comp, covariance_type="diag", n_iter=1000, random_state=self.random_state, verbose=False).fit(train_X, train_lengths)
+                    all_scores.append(model.score(test_X, test_lengths))
+                logP_avg = np.mean(all_scores)
+                if logP_avg > best_score:
+                    best_num_components = n_comp
+                    best_score = logP_avg
+            except:
+                continue
+        return self.base_model(best_num_components)
